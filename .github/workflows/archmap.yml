@@ -26,10 +26,17 @@ jobs:
 
       - run: npm ci
 
-      # Run from the repo root so artifact keys are repo-root-relative and
-      # match `git diff --name-only` paths on the consumer side.
-      - name: Generate archmap artifact
-        run: npx tsx bin/archmap.ts export > archmap.json
+      # Build the graph whole-repo (required to compute dependents), but serve
+      # only the PR's changed files via --scope. Each served entry still carries
+      # its full dependents[] blast radius; archmap normalizes the diff paths
+      # against its own graph keys and records any misses in `scope.missing`.
+      # Run from the repo root so keys stay repo-root-relative.
+      - name: Generate archmap artifact (scoped to this PR)
+        run: |
+          git diff --name-only \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            | npx tsx bin/archmap.ts export --scope - > archmap.json
 
       - name: Upload artifact (keyed by commit SHA, not committed)
         uses: actions/upload-artifact@v4

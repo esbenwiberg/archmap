@@ -1,4 +1,5 @@
 import { execSync } from "child_process";
+import { readFileSync } from "fs";
 import { resolveProject } from "../config.js";
 import { classifyFile } from "../classify.js";
 import { getFreshTopology, getFreshChurn } from "../cache.js";
@@ -26,27 +27,47 @@ export interface ExportedFile {
  * Self-contained artifact for consumers that have no source tree (e.g. a
  * hosted diff-only review bot). Keyed by `commit` so a consumer can verify it
  * matches the PR head SHA before trusting the lookups.
+ *
+ * When built with a `scope` (the PR's changed paths), `files` is narrowed to
+ * just those paths — each still carrying its full `dependents` blast radius —
+ * and the `scope` block records which requested paths were not in the graph,
+ * so a missed lookup is loud rather than silent.
  */
 export interface ExportArtifact {
   version: 1;
   commit: string | null;
   generatedAt: string;
+  scope?: { requested: string[]; missing: string[] };
   files: Record<string, ExportedFile>;
+}
+
+/** Normalize an incoming path to the form dependency-cruiser uses as keys. */
+function normalizePath(p: string): string {
+  return p.trim().replace(/^\.\//, "");
 }
 
 /**
  * Pure transform: topology + config + risk → a fully-classified artifact.
  * No git, no graph build, no I/O — so it is trivially unit-testable.
+ *
+ * If `scope` is given, the graph is still built whole-repo (the caller does
+ * that), but the emitted `files` map is narrowed to the in-scope paths.
  */
 export function buildExportArtifact(
   topology: Topology,
   config: ArchmapConfig,
   riskScores: Map<string, RiskScore>,
   commit: string | null,
+  scope?: string[],
   now: Date = new Date()
 ): ExportArtifact {
+  const keys =
+    scope === undefined
+      ? Object.keys(topology.files)
+      : scope.map(normalizePath).filter((p) => p in topology.files);
+
   const files: Record<string, ExportedFile> = {};
-  for (const file of Object.keys(topology.files)) {
+  for (const file of keys) {
     const c = classifyFile(file, topology, config, riskScores);
     files[file] = {
       class: c.class,
@@ -59,7 +80,21 @@ export function buildExportArtifact(
       dependents: topology.files[file].dependents,
     };
   }
-  return { version: 1, commit, generatedAt: now.toISOString(), files };
+
+  const artifact: ExportArtifact = {
+    version: 1,
+    commit,
+    generatedAt: now.toISOString(),
+    files,
+  };
+  if (scope !== undefined) {
+    const requested = scope.map(normalizePath).filter((p) => p.length > 0);
+    artifact.scope = {
+      requested,
+      missing: requested.filter((p) => !(p in topology.files)),
+    };
+  }
+  return artifact;
 }
 
 function currentCommit(): string | null {
@@ -73,13 +108,23 @@ function currentCommit(): string | null {
   }
 }
 
-export async function exportCommand(opts: { config?: string }): Promise<void> {
+/** Read a newline-delimited path list from a file, or from stdin when "-". */
+function readScope(source: string): string[] {
+  const raw = readFileSync(source === "-" ? 0 : source, "utf8");
+  return raw
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+}
+
+export async function exportCommand(opts: { config?: string; scope?: string }): Promise<void> {
   const { config, entry } = resolveProject(opts.config);
   const { topology } = await getFreshTopology(entry, buildTopology);
   const { churn: churnMap } = getFreshChurn(90, buildChurnMap);
   const riskScores = computeRiskScores(topology, churnMap);
 
-  const artifact = buildExportArtifact(topology, config, riskScores, currentCommit());
+  const scope = opts.scope !== undefined ? readScope(opts.scope) : undefined;
+  const artifact = buildExportArtifact(topology, config, riskScores, currentCommit(), scope);
 
   // export is inherently machine-readable: always emit JSON on stdout.
   console.log(JSON.stringify(artifact, null, 2));
