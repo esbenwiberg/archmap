@@ -1,0 +1,39 @@
+# Publishes a per-commit archmap artifact for external consumers (e.g. a
+# hosted diff-only review bot). The artifact is uploaded to the workflow run —
+# it is NEVER committed to the repo, so there is no churn and no merge conflict.
+#
+# A consumer fetches it by the PR head SHA via the GitHub Actions API:
+#   GET /repos/{owner}/{repo}/actions/artifacts?name=archmap-<sha>
+# then does pure path → verdict lookups against archmap.json.
+name: archmap
+
+on:
+  pull_request:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: churn (90-day window) needs real commit dates.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Run from the repo root so artifact keys are repo-root-relative and
+      # match `git diff --name-only` paths on the consumer side.
+      - name: Generate archmap artifact
+        run: npx tsx bin/archmap.ts export > archmap.json
+
+      - name: Upload artifact (keyed by commit SHA, not committed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: archmap-${{ github.event.pull_request.head.sha }}
+          path: archmap.json
+          retention-days: 90

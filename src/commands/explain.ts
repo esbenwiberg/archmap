@@ -1,4 +1,4 @@
-import { loadConfig } from "../config.js";
+import { resolveProject } from "../config.js";
 import { classifyFile } from "../classify.js";
 import { getFreshTopology } from "../cache.js";
 import { buildTopology } from "../graph.js";
@@ -7,8 +7,7 @@ export async function explainCommand(
   file: string,
   opts: { json?: boolean; config?: string }
 ): Promise<void> {
-  const config = loadConfig(opts.config);
-  const entry = config.analyzers.find((a) => a.lang === "typescript")?.entry ?? "src/";
+  const { config, entry } = resolveProject(opts.config);
   const { topology } = await getFreshTopology(entry, buildTopology);
 
   const node = topology.files[file];

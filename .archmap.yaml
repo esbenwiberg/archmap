@@ -1,0 +1,11 @@
+version: 1
+
+thresholds:
+  leaf: 2        # Ca <= 2  → leaf
+  junction: 10   # Ca > 10  → hub; between is branch
+
+overrides: []
+
+analyzers:
+  - lang: typescript
+    entry: "src/"
