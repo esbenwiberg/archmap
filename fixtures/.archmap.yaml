@@ -1,0 +1,11 @@
+version: 1
+
+thresholds:
+  leaf: 2
+  junction: 10
+
+overrides: []
+
+analyzers:
+  - lang: typescript
+    entry: "fixtures/src/"

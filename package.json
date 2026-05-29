@@ -1,0 +1,31 @@
+{
+  "name": "archmap",
+  "version": "0.1.0",
+  "description": "Classify every file in a Node+TypeScript repo as leaf | branch | hub based on dependency topology",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "archmap": "./bin/archmap.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx bin/archmap.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "dependency-cruiser": "^16.0.0",
+    "micromatch": "^4.0.0",
+    "yaml": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/micromatch": "^4.0.0",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}
