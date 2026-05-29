@@ -26,12 +26,16 @@ const risk = new Map<string, RiskScore>([
 ]);
 
 describe("buildExportArtifact", () => {
-  const artifact = buildExportArtifact(topology, config, risk, "abc123", new Date(0));
+  const artifact = buildExportArtifact(topology, config, risk, "abc123", undefined, new Date(0));
 
   it("stamps the commit and version", () => {
     expect(artifact.version).toBe(1);
     expect(artifact.commit).toBe("abc123");
     expect(artifact.generatedAt).toBe("1970-01-01T00:00:00.000Z");
+  });
+
+  it("omits the scope block when unscoped", () => {
+    expect(artifact.scope).toBeUndefined();
   });
 
   it("classifies every file in the topology", () => {
@@ -58,5 +62,33 @@ describe("buildExportArtifact", () => {
     expect(v.class).toBe("hub");
     expect(v.overridden).toBe(true);
     expect(v.reason).toBe("Security boundary");
+  });
+});
+
+describe("buildExportArtifact — scoped to a PR's changed paths", () => {
+  const scoped = buildExportArtifact(
+    topology,
+    config,
+    risk,
+    "abc123",
+    ["./src/utils.ts", "src/gone.ts", ""], // ./ prefix + a deleted/unknown path + blank
+    new Date(0)
+  );
+
+  it("narrows files to the in-scope paths only", () => {
+    expect(Object.keys(scoped.files)).toEqual(["src/utils.ts"]);
+  });
+
+  it("normalizes leading ./ so it matches graph keys", () => {
+    expect(scoped.files["src/utils.ts"].class).toBe("hub");
+  });
+
+  it("still carries the full blast radius for in-scope files", () => {
+    expect(scoped.files["src/utils.ts"].dependents).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("reports requested paths and loudly lists misses", () => {
+    expect(scoped.scope?.requested).toEqual(["src/utils.ts", "src/gone.ts"]);
+    expect(scoped.scope?.missing).toEqual(["src/gone.ts"]);
   });
 });

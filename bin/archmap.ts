@@ -68,9 +68,10 @@ program
 program
   .command("export")
   .description("Emit a self-contained classified topology artifact (JSON) for external consumers")
-  .action(async () => {
+  .option("--scope <file>", "Narrow output to a newline-delimited path list (\"-\" for stdin)")
+  .action(async (opts) => {
     const globalOpts = program.opts();
-    await exportCommand({ config: globalOpts.config });
+    await exportCommand({ ...opts, config: globalOpts.config });
   });
 
 program.parseAsync(process.argv).catch((err) => {

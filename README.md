@@ -32,7 +32,7 @@ archmap classify <file>           # leaf | branch | hub + Ca, instability, risk,
 archmap check <file>...           # exit 1 if ANY input is a hub (CI gate)
 archmap explain <file>            # list dependents + classification rationale
 archmap risk [--top N]            # rank files by combined topology + churn risk
-archmap export                    # emit a self-contained classified artifact (JSON)
+archmap export [--scope <file>]   # self-contained classified artifact (JSON); --scope narrows to a path list
 ```
 
 All commands accept `--json` for machine-readable output (`export` is always JSON). All commands accept `--config <path>` to point at an alternate `.archmap.yaml`.
@@ -150,70 +150,79 @@ tree* (a hosted review bot that only ever sees a diff) can classify changed
 files by pure lookup.
 
 ```bash
-archmap export > archmap.json
+archmap export > archmap.json   # whole repo — every file (good for a global map)
+```
+
+**Scope it to a PR.** The graph still has to be built whole-repo (you can't know
+a file's `dependents` without seeing every importer), but the *output* doesn't
+have to be. `--scope` narrows the emitted `files` to a path list — typically the
+PR's changed files — while keeping each entry's full `dependents` blast radius:
+
+```bash
+git diff --name-only BASE HEAD | archmap export --scope -   # "-" = stdin; or a file
 # {
 #   "version": 1,
-#   "commit": "36d9aef…",            # so a consumer can verify it matches the PR head SHA
+#   "commit": "36d9aef…",                     # consumer verifies this == PR head SHA
 #   "generatedAt": "2026-05-29T19:37:36.047Z",
-#   "files": {
+#   "scope": {
+#     "requested": ["src/auth/TokenValidator.ts", "src/old.ts"],
+#     "missing":   ["src/old.ts"]              # requested but not in the graph — loud, not silent
+#   },
+#   "files": {                                 # only the in-scope (changed) files
 #     "src/auth/TokenValidator.ts": {
 #       "class": "hub", "ca": 14, "tca": 63,
 #       "instability": 0.06, "risk": 100,
 #       "overridden": false,
 #       "reason": "Ca=14 (14 direct, 63 transitive)",
 #       "dependents": ["src/api/login.ts", "…"]   // the off-diff blast radius
-#     },
-#     // … every file in the topology
+#     }
 #   }
 # }
 ```
 
-**The artifact is derived data — never commit it.** Committing a repo-wide
-generated file means churn on every PR and a guaranteed merge conflict between
-any two concurrent PRs. Instead, build it in CI (which has the tree) and ship
-it *out of band*, keyed by commit SHA.
+Scoping makes the artifact's size track the **diff**, not the repo (a one-line PR
+→ a few entries, not 10k), and archmap normalizes the incoming paths against its
+own graph keys — so a path that doesn't resolve lands in `scope.missing` rather
+than silently vanishing.
+
+**The artifact is derived data — never commit it.** Committing a generated file
+means churn on every PR and a guaranteed merge conflict between any two
+concurrent PRs. Instead, build it in CI (which has the tree) and ship it *out of
+band*, keyed by commit SHA.
 
 #### Consuming the artifact (diff-only review bot)
 
-A bot has the changed paths but no graph. The integration is: **CI builds the
-artifact, the bot looks paths up in it.**
+The integration is: **CI builds and scopes the artifact, the bot just reacts.**
 
-1. **CI** runs `archmap export` on every PR and uploads `archmap.json` to the
+1. **CI** runs the scoped `export` on every PR and uploads `archmap.json` to the
    workflow run, named `archmap-<head-sha>` — see
    [`.github/workflows/archmap.yml`](.github/workflows/archmap.yml). Use
-   `fetch-depth: 0` so churn (90-day window) sees real commit dates, and run
-   from the repo root so artifact keys are repo-root-relative.
+   `fetch-depth: 0` so churn (90-day window) sees real commit dates and the diff
+   base is reachable, and run from the repo root so keys stay repo-root-relative.
 2. **The bot**, on the PR webhook, has the head SHA. It downloads the matching
-   artifact via the GitHub Actions API and does pure lookups — no clone, no
-   Node, no archmap install:
+   artifact via the GitHub Actions API — no clone, no Node, no archmap install.
+   Because CI already scoped to the diff, `files` *is* the PR's changed set, so
+   the bot iterates it directly (no filtering step):
 
    ```js
-   // pseudo-bot — paths from the diff, verdicts from the artifact
    const art = await fetchArtifact(`archmap-${pr.head.sha}`); // GH Actions API
-   if (art.commit !== pr.head.sha) return; // stale artifact, skip
+   if (art.commit !== pr.head.sha) return;        // stale artifact, skip
+   if (art.scope.missing.length)                  // paths CI couldn't resolve —
+     warn(`unresolved: ${art.scope.missing}`);    //   surface, don't swallow
 
-   const changed = await diffNames(pr.base.sha, pr.head.sha); // git diff --name-only
-   const hubs = changed
-     .map((p) => ({ path: p, ...art.files[p] }))
-     .filter((v) => v?.class === "hub");
+   const hubs = Object.entries(art.files)
+     .filter(([, v]) => v.class === "hub");
 
    if (hubs.length) {
      comment(
        "⚠️ load-bearing files in this diff:\n" +
-       hubs.map((h) => `- \`${h.path}\` — ${h.dependents.length} dependents (risk ${h.risk}/100)`).join("\n")
+       hubs.map(([p, h]) => `- \`${p}\` — ${h.dependents.length} dependents (risk ${h.risk}/100)`).join("\n")
      );
    }
    ```
 
    The `dependents` array is the payload the bot can't get from a diff: the
    files that import the changed one but aren't in the changeset.
-
-**Path matching is the one thing to verify.** `git diff --name-only` yields
-repo-root-relative paths; artifact keys are repo-root-relative *as long as CI
-runs `archmap export` from the repo root*. If your bot's diff paths and the
-artifact keys ever drift (renames, monorepo subdirs), normalize both sides to
-the same root before lookup. A miss is silent — `art.files[p]` is just
-`undefined` — so assert that every changed `.ts`/`.tsx` path resolves.
 
 If you need the artifact to outlive Actions' retention or to be reachable
 outside GitHub, swap the upload step for a `PUT` to a blob store keyed by SHA
