@@ -5,6 +5,7 @@ import { classifyCommand } from "../src/commands/classify.js";
 import { checkCommand } from "../src/commands/check.js";
 import { explainCommand } from "../src/commands/explain.js";
 import { riskCommand } from "../src/commands/risk.js";
+import { exportCommand } from "../src/commands/export.js";
 
 const program = new Command();
 
@@ -62,6 +63,14 @@ program
   .action(async (opts) => {
     const globalOpts = program.opts();
     await riskCommand({ ...opts, config: globalOpts.config });
+  });
+
+program
+  .command("export")
+  .description("Emit a self-contained classified topology artifact (JSON) for external consumers")
+  .action(async () => {
+    const globalOpts = program.opts();
+    await exportCommand({ config: globalOpts.config });
   });
 
 program.parseAsync(process.argv).catch((err) => {

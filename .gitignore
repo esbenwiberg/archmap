@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .archmap/
+
+# Generated export artifact — derived data, published out of band, never committed.
+archmap.json
