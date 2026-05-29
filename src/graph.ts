@@ -19,12 +19,17 @@ export async function buildTopology(entry: string): Promise<Topology> {
 
   const modules = (result.output as any).modules as Array<{
     source: string;
+    coreModule?: boolean;
     dependencies: Array<{ resolved: string; coreModule?: boolean }>;
     dependents?: string[];
   }>;
 
   const files: Topology["files"] = {};
   for (const m of modules) {
+    // Skip non-repo modules: Node core (fs, path, …) and externals under
+    // node_modules. They surface as leaf nodes in the cruise output but are
+    // not files we classify, and counting them pollutes risk rankings.
+    if (m.coreModule || m.source.includes("node_modules/")) continue;
     const ce = m.dependencies.filter((d) => !d.coreModule).length;
     const deps = m.dependents ?? [];
     files[m.source] = { ca: deps.length, ce, tca: 0, dependents: deps };

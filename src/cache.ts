@@ -1,14 +1,22 @@
 import { createHash } from "crypto";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { execSync } from "child_process";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import type { Topology } from "./graph.js";
+import type { ChurnData } from "./churn.js";
 import { listTypeScriptFiles } from "./files.js";
 
 const CACHE_DIR = ".archmap";
 const CACHE_FILE = `${CACHE_DIR}/cache.json`;
 
+interface ChurnCache {
+  key: string; // `${headSha}:${windowDays}` — busts when HEAD or window changes
+  entries: Array<[string, ChurnData]>;
+}
+
 interface CacheEntry {
   hash: string;
   topology: Topology;
+  churn?: ChurnCache;
 }
 
 function computeStructureHash(entry: string): string {
@@ -35,9 +43,15 @@ export function readCache(): CacheEntry | null {
   }
 }
 
-export function writeCache(hash: string, topology: Topology): void {
+function writeCacheEntry(entry: CacheEntry): void {
   mkdirSync(CACHE_DIR, { recursive: true });
-  writeFileSync(CACHE_FILE, JSON.stringify({ hash, topology }, null, 2));
+  writeFileSync(CACHE_FILE, JSON.stringify(entry, null, 2));
+}
+
+/** Persist topology under a structure hash, preserving any cached churn. */
+export function writeCache(hash: string, topology: Topology): void {
+  const existing = readCache();
+  writeCacheEntry({ hash, topology, churn: existing?.churn });
 }
 
 export async function getFreshTopology(
@@ -52,4 +66,36 @@ export async function getFreshTopology(
   const topology = await buildFn(entry);
   writeCache(hash, topology);
   return { topology, cacheHit: false };
+}
+
+function gitHead(): string {
+  try {
+    return execSync("git rev-parse HEAD", {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "nogit";
+  }
+}
+
+/**
+ * Return the churn map, reusing the cached one when git HEAD and the window
+ * are unchanged. Churn is keyed on HEAD (not the structure hash) because it
+ * derives from commit history, not import structure — so editing a file body
+ * doesn't bust it, but a new commit does.
+ */
+export function getFreshChurn(
+  windowDays: number,
+  buildFn: (windowDays: number) => Map<string, ChurnData>
+): { churn: Map<string, ChurnData>; cacheHit: boolean } {
+  const key = `${gitHead()}:${windowDays}`;
+  const cached = readCache();
+  if (cached?.churn && cached.churn.key === key) {
+    return { churn: new Map(cached.churn.entries), cacheHit: true };
+  }
+  const churn = buildFn(windowDays);
+  const base: CacheEntry = cached ?? { hash: "", topology: { files: {} } };
+  writeCacheEntry({ ...base, churn: { key, entries: [...churn] } });
+  return { churn, cacheHit: false };
 }

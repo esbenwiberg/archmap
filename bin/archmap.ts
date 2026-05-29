@@ -20,13 +20,10 @@ program
   .option("--entry <path>", "Entry path override (overrides config)")
   .option("--json", "JSON output")
   .action(async (opts) => {
-    const { loadConfig } = await import("../src/config.js");
+    const { resolveProject } = await import("../src/config.js");
     const globalOpts = program.opts();
-    const config = loadConfig(globalOpts.config);
-    const entry =
-      opts.entry ??
-      config.analyzers.find((a) => a.lang === "typescript")?.entry ??
-      "src/";
+    const { entry: cfgEntry } = resolveProject(globalOpts.config);
+    const entry = opts.entry ?? cfgEntry;
     await scanCommand(entry, opts);
   });
 

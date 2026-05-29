@@ -1,6 +1,6 @@
-import { loadConfig } from "../config.js";
+import { resolveProject } from "../config.js";
 import { classifyFile } from "../classify.js";
-import { getFreshTopology } from "../cache.js";
+import { getFreshTopology, getFreshChurn } from "../cache.js";
 import { buildTopology } from "../graph.js";
 import { buildChurnMap } from "../churn.js";
 import { computeRiskScores } from "../risk.js";
@@ -10,11 +10,10 @@ export async function checkCommand(
   files: string[],
   opts: { json?: boolean; config?: string }
 ): Promise<void> {
-  const config = loadConfig(opts.config);
-  const entry = config.analyzers.find((a) => a.lang === "typescript")?.entry ?? "src/";
+  const { config, entry } = resolveProject(opts.config);
   const { topology } = await getFreshTopology(entry, buildTopology);
 
-  const churnMap = buildChurnMap();
+  const { churn: churnMap } = getFreshChurn(90, buildChurnMap);
   const riskScores = computeRiskScores(topology, churnMap);
 
   const results: Classification[] = files.map((f) =>
