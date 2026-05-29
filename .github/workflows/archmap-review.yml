@@ -1,0 +1,70 @@
+# Sample diff-only review bot triggered by workflow_run.
+#
+# Why workflow_run and not pull_request:
+#   pull_request fires at the same instant CI starts — the archmap artifact
+#   does not exist yet and any immediate fetch will 404. workflow_run fires
+#   only after the named workflow completes, so the artifact is guaranteed to
+#   be present by the time this job downloads it. No polling, no retries.
+#
+# Permissions: workflow_run jobs execute in the context of the base branch and
+# therefore have write access to secrets and pull-request comments even for
+# fork PRs. pull_request jobs from forks run with read-only tokens.
+#
+# Fork caveat: github.event.workflow_run.pull_requests is empty for fork PRs.
+# Pass the PR number through the artifact itself (add it to archmap export
+# output) or via a separate artifact if you need to comment on fork PRs.
+
+name: archmap-review
+
+on:
+  workflow_run:
+    workflows: ["archmap"]
+    types: [completed]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    # Only act when CI succeeded — a failed build has no artifact to read.
+    if: github.event.workflow_run.conclusion == 'success'
+    permissions:
+      pull-requests: write   # post comments
+      actions: read          # download artifact from the triggering run
+
+    steps:
+      - name: Download archmap artifact
+        uses: actions/download-artifact@v4
+        with:
+          # The archmap workflow names the artifact archmap-<head-sha>.
+          name: archmap-${{ github.event.workflow_run.head_sha }}
+          # Pull from the triggering run, not this one.
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Comment on hubs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const art = JSON.parse(fs.readFileSync('archmap.json', 'utf8'));
+
+            // workflow_run.pull_requests is populated for same-repo PRs only.
+            const prs = context.payload.workflow_run.pull_requests;
+            if (!prs.length) return; // fork PR — see header note
+
+            const pr = prs[0];
+            const hubs = Object.entries(art.files)
+              .filter(([, v]) => v.class === 'hub');
+
+            if (!hubs.length) return;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body:
+                '⚠️ load-bearing files in this diff:\n' +
+                hubs
+                  .map(([p, h]) =>
+                    `- \`${p}\` — ${h.dependents.length} dependents (risk ${h.risk}/100)`)
+                  .join('\n'),
+            });

@@ -2,9 +2,15 @@
 # hosted diff-only review bot). The artifact is uploaded to the workflow run —
 # it is NEVER committed to the repo, so there is no churn and no merge conflict.
 #
-# A consumer fetches it by the PR head SHA via the GitHub Actions API:
-#   GET /repos/{owner}/{repo}/actions/artifacts?name=archmap-<sha>
-# then does pure path → verdict lookups against archmap.json.
+# Race-condition note: both this workflow and the PR webhook fire at the same
+# instant. Any consumer that reacts to the pull_request event will arrive before
+# the artifact exists. Trigger downstream work on workflow_run instead:
+#   on:
+#     workflow_run:
+#       workflows: ["archmap"]
+#       types: [completed]
+# That event fires only after this job finishes — the artifact is guaranteed to
+# be present. See .github/workflows/archmap-review.yml for a complete example.
 name: archmap
 
 on:
@@ -13,6 +19,9 @@ on:
 jobs:
   export:
     runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ steps.upload.outputs.artifact-name || format('archmap-{0}', github.event.pull_request.head.sha) }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v4
         with:

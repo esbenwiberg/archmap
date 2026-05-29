@@ -194,35 +194,60 @@ band*, keyed by commit SHA.
 
 The integration is: **CI builds and scopes the artifact, the bot just reacts.**
 
-1. **CI** runs the scoped `export` on every PR and uploads `archmap.json` to the
-   workflow run, named `archmap-<head-sha>` — see
-   [`.github/workflows/archmap.yml`](.github/workflows/archmap.yml). Use
-   `fetch-depth: 0` so churn (90-day window) sees real commit dates and the diff
-   base is reachable, and run from the repo root so keys stay repo-root-relative.
-2. **The bot**, on the PR webhook, has the head SHA. It downloads the matching
-   artifact via the GitHub Actions API — no clone, no Node, no archmap install.
-   Because CI already scoped to the diff, `files` *is* the PR's changed set, so
-   the bot iterates it directly (no filtering step):
+**Race condition** — the `pull_request` webhook and the CI run fire at the same
+instant. Any consumer triggered by `pull_request` will arrive before the
+artifact exists and get a 404. Trigger downstream work on `workflow_run`
+instead:
 
-   ```js
-   const art = await fetchArtifact(`archmap-${pr.head.sha}`); // GH Actions API
-   if (art.commit !== pr.head.sha) return;        // stale artifact, skip
-   if (art.scope.missing.length)                  // paths CI couldn't resolve —
-     warn(`unresolved: ${art.scope.missing}`);    //   surface, don't swallow
+```yaml
+on:
+  workflow_run:
+    workflows: ["archmap"]
+    types: [completed]
+```
 
-   const hubs = Object.entries(art.files)
-     .filter(([, v]) => v.class === "hub");
+That event fires only after the archmap job finishes — the artifact is
+guaranteed to be present. No polling, no retries, no sleep loops.
 
-   if (hubs.length) {
-     comment(
-       "⚠️ load-bearing files in this diff:\n" +
-       hubs.map(([p, h]) => `- \`${p}\` — ${h.dependents.length} dependents (risk ${h.risk}/100)`).join("\n")
-     );
-   }
-   ```
+**As a GitHub Actions workflow** — see
+[`.github/workflows/archmap-review.yml`](.github/workflows/archmap-review.yml)
+for a complete, copy-paste ready example. Key points:
+- `workflow_run` jobs run in the base-branch context and have write access to
+  `pull-requests` even for fork PRs (unlike `pull_request` jobs).
+- Download the artifact from the *triggering* run via `run-id:
+  ${{ github.event.workflow_run.id }}`.
+- `github.event.workflow_run.pull_requests` is empty for fork PRs; embed the PR
+  number inside the artifact or via a sidecar artifact if you need fork support.
 
-   The `dependents` array is the payload the bot can't get from a diff: the
-   files that import the changed one but aren't in the changeset.
+**As an external webhook bot** — subscribe to `workflow_run` events (not
+`pull_request`). Filter for `workflow_run.name === "archmap"` and
+`workflow_run.conclusion === "success"`, then fetch the artifact by
+`workflow_run.head_sha`:
+
+```js
+// webhook handler for workflow_run events
+if (payload.workflow_run.name !== "archmap") return;
+if (payload.workflow_run.conclusion !== "success") return;
+
+const sha = payload.workflow_run.head_sha;
+const art = await fetchArtifact(`archmap-${sha}`); // GH Actions API
+
+if (art.scope.missing.length)                  // paths CI couldn't resolve —
+  warn(`unresolved: ${art.scope.missing}`);    //   surface, don't swallow
+
+const hubs = Object.entries(art.files)
+  .filter(([, v]) => v.class === "hub");
+
+if (hubs.length) {
+  comment(
+    "⚠️ load-bearing files in this diff:\n" +
+    hubs.map(([p, h]) => `- \`${p}\` — ${h.dependents.length} dependents (risk ${h.risk}/100)`).join("\n")
+  );
+}
+```
+
+The `dependents` array is the payload the bot can't get from a diff: the
+files that import the changed one but aren't in the changeset.
 
 If you need the artifact to outlive Actions' retention or to be reachable
 outside GitHub, swap the upload step for a `PUT` to a blob store keyed by SHA
