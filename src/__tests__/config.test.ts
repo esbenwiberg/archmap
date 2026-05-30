@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { findConfigPath, resolveProject } from "../config.js";
@@ -9,7 +9,7 @@ describe("findConfigPath", () => {
   const cwd = process.cwd();
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "archmap-cfg-"));
+    root = realpathSync(mkdtempSync(join(tmpdir(), "archmap-cfg-")));
   });
   afterEach(() => {
     process.chdir(cwd);
@@ -40,7 +40,7 @@ describe("resolveProject", () => {
   const cwd = process.cwd();
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "archmap-proj-"));
+    root = realpathSync(mkdtempSync(join(tmpdir(), "archmap-proj-")));
   });
   afterEach(() => {
     process.chdir(cwd);
