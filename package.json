@@ -1,5 +1,5 @@
 {
-  "name": "archmap",
+  "name": "@esbenwiberg/archmap",
   "version": "0.1.0",
   "description": "Classify every file in a Node+TypeScript repo as leaf | branch | hub based on dependency topology",
   "type": "module",
@@ -7,10 +7,18 @@
     "node": ">=18"
   },
   "bin": {
-    "archmap": "./bin/archmap.js"
+    "archmap": "./dist/bin/archmap.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "dev": "tsx bin/archmap.ts",
     "test": "vitest run",
     "test:watch": "vitest"
