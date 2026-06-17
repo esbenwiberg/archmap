@@ -19,7 +19,7 @@ Also computed: **instability** `I = Ce / (Ca + Ce)` (Robert Martin's metric). Re
 ## Install
 
 ```bash
-npm install -g archmap
+npm install -g @esbenwiberg/archmap
 # or run locally:
 npx tsx bin/archmap.ts <command>
 ```
