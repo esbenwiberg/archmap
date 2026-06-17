@@ -15,6 +15,12 @@ export async function buildTopology(entry: string): Promise<Topology> {
   const result = await cruise([entry], {
     doNotFollow: { path: "node_modules" },
     exclude: { path: "\\.(test|spec)\\.tsx?$" },
+    // Count `import type` / type-only edges. Without this, dependency-cruiser
+    // drops type-only imports, so a pure type contract (e.g. a ports-and-
+    // adapters `types.ts` imported only via `import type`) reads as Ca=0 →
+    // misclassified as a leaf. For a review-gating tool, a published type
+    // contract is exactly when a human IS needed, so type edges must count.
+    tsPreCompilationDeps: true,
   });
 
   const modules = (result.output as any).modules as Array<{
