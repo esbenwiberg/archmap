@@ -1,6 +1,6 @@
 {
   "name": "@esbenwiberg/archmap",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Classify every file in a Node+TypeScript repo as leaf | branch | hub based on dependency topology",
   "type": "module",
   "engines": {
