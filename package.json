@@ -7,7 +7,7 @@
     "node": ">=18"
   },
   "bin": {
-    "archmap": "./dist/bin/archmap.js"
+    "archmap": "dist/bin/archmap.js"
   },
   "files": [
     "dist",
